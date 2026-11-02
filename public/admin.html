@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex"><title>Admin</title>
+<style>
+*{box-sizing:border-box}body{margin:0;font:16px/1.5 system-ui,sans-serif;background:#f3f6fb;color:#14213d;padding:16px}
+.w{max-width:1000px;margin:auto}h1{margin:0 0 12px}h2{margin:0 0 12px;font-size:20px}
+.c{background:#fff;border-radius:16px;padding:18px;margin-bottom:16px;box-shadow:0 2px 12px #0001}
+.g{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px}
+.s{background:#eef3fb;border-radius:12px;padding:12px;text-align:center}.s b{display:block;font-size:28px}
+button,select,input{font:inherit;padding:10px 14px;border-radius:10px;border:1px solid #c7d3ec}
+button{background:#2457d6;color:#fff;border:0;cursor:pointer;font-weight:600}button.x{background:#16a34a}
+.bar{display:flex;align-items:center;gap:10px;margin:8px 0}.bar i{display:block;height:28px;background:#2457d6;border-radius:6px;min-width:2px;transition:width .4s}
+.bar span{width:120px;flex:none}.pics{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px}
+.pics img{width:100%;aspect-ratio:16/10;object-fit:cover;border-radius:10px}.pics input[type=text]{width:100%;margin:6px 0}
+.tw{max-height:360px;overflow:auto}table{width:100%;border-collapse:collapse}td,th{padding:6px 10px;border-bottom:1px solid #eee;text-align:left}
+.u{color:#16a34a;font-weight:600}.m{color:#dc2626;margin:8px 0}
+</style></head><body><div class="w">
+<div id="login" class="c" style="max-width:380px;margin:60px auto"><h1>Admin login</h1>
+<input id="pw" type="password" placeholder="Password" style="width:100%;margin-bottom:10px">
+<button id="in" style="width:100%">Sign in</button><div id="lerr" class="m"></div></div>
+
+<div id="app" hidden>
+<h1>Voting Admin</h1>
+<div class="c"><h2>Live statistics</h2><div class="g" id="stats"></div><div id="bars" style="margin-top:14px"></div></div>
+<div class="c"><h2>Pictures</h2><div class="pics" id="pics"></div></div>
+<div class="c"><h2>Export</h2>
+<button class="x" id="exv">Export votes to Excel</button>
+<button class="x" id="exc">Export codes to Excel</button></div>
+<div class="c"><h2>Voting codes</h2>
+<button id="gen">Generate 400 codes</button>
+<select id="flt"><option value="">All</option><option>Used</option><option>Unused</option></select>
+<div id="amsg" class="m"></div><div class="tw"><table id="tb"></table></div></div>
+</div></div>
+<script>
+const $=id=>document.getElementById(id);
+let pw=sessionStorage.getItem("pw")||"",codes=[];
+const api=(u,o={})=>fetch(u,{...o,headers:{"x-admin-password":pw,"content-type":"application/json"}});
+async function boot(){
+  const r=await api("/api/admin/stats");
+  if(r.status===401){sessionStorage.removeItem("pw");$("login").hidden=false;$("app").hidden=true;return false}
+  $("login").hidden=true;$("app").hidden=false;draw(await r.json());return true}
+$("in").onclick=async()=>{pw=$("pw").value;sessionStorage.setItem("pw",pw);
+  if(await boot()){loadPics();loadCodes()}else $("lerr").textContent="Wrong password."};
+function draw(s){
+  const v=s.votes,tot=v[1]+v[2]+v[3],p=(a,b)=>b?(a/b*100).toFixed(1)+"%":"0.0%";
+  $("stats").innerHTML=[["Total codes",s.total],["Votes received",tot],["Unused codes",s.total-s.used],["Used codes",s.used],["Voting percentage",p(s.used,s.total)]]
+   .map(([k,x])=>`<div class="s"><b>${x}</b>${k}</div>`).join("");
+  $("bars").innerHTML=[1,2,3].map(n=>`<div class="bar"><span>Picture ${n}</span><i style="width:${tot?v[n]/tot*70:0}%"></i><b>${v[n]} (${p(v[n],tot)})</b></div>`).join("");}
+async function loadPics(){
+  const ps=await (await fetch("/api/pics")).json();$("pics").replaceChildren();
+  ps.forEach(p=>{const d=document.createElement("div");
+    d.innerHTML=`<b>Picture ${p.n}</b><img src="/api/pic/${p.n}?v=${p.v}"><input type="text" placeholder="Short title (optional)"><input type="file" accept="image/*"><button>Save</button> <span class="u"></span>`;
+    const [t,f]=d.querySelectorAll("input"),btn=d.querySelector("button"),msg=d.querySelector("span");t.value=p.title;
+    btn.onclick=async()=>{btn.disabled=true;msg.textContent="";
+      let image=null;if(f.files[0])image=await shrink(f.files[0]);
+      const r=await api("/api/admin/pic/"+p.n,{method:"PUT",body:JSON.stringify({title:t.value,image})});
+      msg.textContent=r.ok?"Saved":"Failed";btn.disabled=false;if(r.ok&&image)loadPics()};
+    $("pics").append(d)})}
+function shrink(file){return new Promise(res=>{const i=new Image();i.onload=()=>{const k=Math.min(1,1600/i.width),c=document.createElement("canvas");
+  c.width=i.width*k;c.height=i.height*k;c.getContext("2d").drawImage(i,0,0,c.width,c.height);res(c.toDataURL("image/jpeg",.9))};i.src=URL.createObjectURL(file)})}
+async function loadCodes(){codes=await (await api("/api/admin/codes")).json();showCodes()}
+function showCodes(){const f=$("flt").value;
+  $("tb").innerHTML="<tr><th>Code</th><th>Status</th></tr>"+codes.filter(c=>!f||(f==="Used")===!!c.used_at)
+   .map(c=>`<tr><td>${c.code}</td><td>${c.used_at?"Used":"Unused"}</td></tr>`).join("")}
+$("flt").onchange=showCodes;
+$("gen").onclick=async()=>{const r=await api("/api/admin/generate",{method:"POST",body:"{}"});
+  $("amsg").textContent=r.ok?"":(await r.json()).error;boot();loadCodes()};
+async function dl(type){const r=await api("/api/admin/export?type="+type);if(!r.ok)return;
+  const a=document.createElement("a");a.href=URL.createObjectURL(await r.blob());a.download=type+"-"+new Date().toISOString().slice(0,10)+".xlsx";a.click()}
+$("exv").onclick=()=>dl("votes");$("exc").onclick=()=>dl("codes");
+boot().then(ok=>{if(ok){loadPics();loadCodes();setInterval(boot,10000)}});
+</script></body></html>

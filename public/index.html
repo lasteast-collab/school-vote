@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Voting Competition</title>
+<style>
+:root{--bg:#eef3fb;--ink:#14213d;--pri:#2457d6;--ok:#16a34a;--err:#dc2626}
+*{box-sizing:border-box}body{margin:0;font:18px/1.5 system-ui,sans-serif;background:linear-gradient(160deg,#eef3fb,#dfe9fb);color:var(--ink);min-height:100vh}
+.screen{display:none;min-height:100vh;padding:28px 18px;flex-direction:column;align-items:center;justify-content:center;text-align:center}
+.screen.on{display:flex;animation:in .4s ease}
+@keyframes in{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+h1{font-size:clamp(26px,5vw,40px);margin:0 0 10px}p{margin:0 0 22px;max-width:560px}
+.box{background:#fff;border-radius:20px;padding:32px 24px;box-shadow:0 10px 40px #2457d622;width:100%;max-width:440px}
+input{width:100%;font-size:32px;letter-spacing:.4em;text-align:center;padding:14px;border:2px solid #c7d3ec;border-radius:14px}
+input:focus{outline:none;border-color:var(--pri)}
+.btn{width:100%;margin-top:16px;font-size:22px;font-weight:700;padding:16px;border:0;border-radius:14px;background:var(--pri);color:#fff;cursor:pointer}
+.btn:disabled{opacity:.6}.btn.ghost{background:#e5e9f3;color:var(--ink)}.btn.ok{background:var(--ok)}
+.err{color:var(--err);min-height:28px;margin-top:12px;font-weight:600}
+.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;width:100%;max-width:1200px}
+@media(max-width:800px){.cards{grid-template-columns:1fr}}
+.card{background:#fff;border:4px solid transparent;border-radius:18px;padding:10px;cursor:pointer;box-shadow:0 6px 24px #0001;transition:.2s;font:inherit;color:inherit}
+.card:hover{transform:translateY(-4px)}.card.sel{border-color:var(--pri);box-shadow:0 0 0 6px #2457d633;transform:scale(1.02)}
+.card img{width:100%;aspect-ratio:16/10;object-fit:cover;border-radius:12px;display:block}
+.card b{display:block;padding:10px 4px 4px}
+.modal{position:fixed;inset:0;background:#0008;display:none;align-items:center;justify-content:center;padding:18px}.modal.on{display:flex}
+.conf{position:fixed;top:-20px;width:10px;height:16px;animation:fall linear forwards}
+@keyframes fall{to{transform:translateY(110vh) rotate(720deg)}}
+.big{font-size:80px}
+</style></head><body>
+<div id="welcome" class="screen on" dir="rtl"><div class="box">
+<img id="logo" src="/logo.gif" alt="" onerror="this.style.display='none'" style="max-width:240px;width:70%;height:auto;border-radius:50%;margin:0 auto 18px;display:block">
+<p style="font-size:24px;font-weight:700;margin:0 0 14px">ادخل الرقم الشخصي</p>
+<input id="code" dir="ltr" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="off" placeholder="••••••" aria-label="الرقم الشخصي">
+<div id="err" class="err"></div>
+<button id="go" class="btn" style="font-size:28px;padding:20px">دخول</button></div></div>
+
+<div id="vote" class="screen">
+<h1>Choose Your Favorite Picture!</h1>
+<p>Please select ONE picture. Your vote cannot be changed after submission.</p>
+<div id="cards" class="cards"></div></div>
+
+<div id="thanks" class="screen"><div class="big">🎉</div>
+<h1>Thank You for Voting!</h1>
+<p>Your vote has been successfully recorded. We appreciate your participation!</p></div>
+
+<div id="modal" class="modal"><div class="box">
+<h1 style="font-size:26px">Are you sure you want to vote for this picture?</h1>
+<div id="merr" class="err"></div>
+<button id="yes" class="btn ok">Confirm Vote</button>
+<button id="no" class="btn ghost">Cancel</button></div></div>
+
+<script>
+const $=id=>document.getElementById(id);
+let code="",pick=null;
+const show=id=>{document.querySelectorAll(".screen").forEach(s=>s.classList.remove("on"));$(id).classList.add("on");scrollTo(0,0)};
+const post=async(u,d)=>{const r=await fetch(u,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(d)});return r.json()};
+const USED="تم استخدام هذا الرقم من قبل. يحق لكل مشارك التصويت مرة واحدة فقط";
+$("code").addEventListener("input",e=>{e.target.value=e.target.value.replace(/\D/g,"").slice(0,6);$("err").textContent=""});
+$("code").addEventListener("keydown",e=>{if(e.key==="Enter")$("go").click()});
+$("go").onclick=async()=>{
+  const v=$("code").value;
+  if(!/^\d{6}$/.test(v))return $("err").textContent="الرجاء إدخال 6 أرقام";
+  $("go").disabled=true;
+  try{
+    const r=await post("/api/check",{code:v});
+    if(r.status==="invalid")$("err").textContent="الرقم غير صحيح. حاول مرة أخرى";
+    else if(r.status==="used")$("err").textContent=USED;
+    else if(r.status==="ok"){code=v;await load();show("vote")}
+    else $("err").textContent="حدث خطأ. حاول مرة أخرى";
+  }catch{$("err").textContent="مشكلة في الاتصال. حاول مرة أخرى"}
+  $("go").disabled=false;
+};
+async function load(){
+  const pics=await (await fetch("/api/pics")).json();
+  $("cards").replaceChildren(...pics.map(p=>{
+    const b=document.createElement("button");b.className="card";
+    const i=document.createElement("img");i.src=`/api/pic/${p.n}?v=${p.v}`;i.alt=p.title||`Picture ${p.n}`;
+    b.append(i);
+    if(p.title){const t=document.createElement("b");t.textContent=p.title;b.append(t)}
+    b.onclick=()=>{document.querySelectorAll(".card").forEach(c=>c.classList.remove("sel"));b.classList.add("sel");pick=p.n;$("merr").textContent="";$("modal").classList.add("on")};
+    return b}));
+}
+$("no").onclick=()=>{$("modal").classList.remove("on");document.querySelectorAll(".card").forEach(c=>c.classList.remove("sel"))};
+$("yes").onclick=async()=>{
+  $("yes").disabled=true;
+  try{
+    const r=await post("/api/vote",{code,picture:pick});
+    if(r.status==="ok"){$("modal").classList.remove("on");code="";show("thanks");party()}
+    else if(r.status==="used"){$("modal").classList.remove("on");$("code").value="";$("err").textContent=USED;show("welcome")}
+    else $("merr").textContent="Could not record your vote. Please try again."
+  }catch{$("merr").textContent="مشكلة في الاتصال. حاول مرة أخرى"}
+  $("yes").disabled=false;
+};
+function party(){const cs=["#2457d6","#16a34a","#f59e0b","#ec4899","#8b5cf6"];
+  for(let i=0;i<60;i++){const d=document.createElement("div");d.className="conf";
+    d.style.cssText=`left:${Math.random()*100}vw;background:${cs[i%5]};animation-duration:${2+Math.random()*2.5}s;animation-delay:${Math.random()}s`;
+    document.body.append(d);setTimeout(()=>d.remove(),6000)}}
+</script></body></html>
