@@ -19,29 +19,33 @@ button{background:#2457d6;color:#fff;border:0;cursor:pointer;font-weight:600}but
 <div id="login" class="c" style="max-width:380px;margin:60px auto"><h1>Admin login</h1>
 <input id="pw" type="password" placeholder="Password" style="width:100%;margin-bottom:10px">
 <button id="in" style="width:100%">Sign in</button><div id="lerr" class="m"></div></div>
-
 <div id="app" hidden>
 <h1>Voting Admin</h1>
-<div class="c"><h2>Live statistics</h2><div class="g" id="stats"></div><div id="bars" style="margin-top:14px"></div></div>
+<div class="c"><h2>Live statistics</h2><select id="cls" style="margin-bottom:12px"></select><div class="g" id="stats"></div><div id="bars" style="margin-top:14px"></div></div>
 <div class="c"><h2>Pictures</h2><div class="pics" id="pics"></div></div>
 <div class="c"><h2>Export</h2>
 <button class="x" id="exv">Export votes to Excel</button>
 <button class="x" id="exc">Export codes to Excel</button></div>
 <div class="c"><h2>Voting codes</h2>
-<button id="gen">Generate 400 codes</button>
+<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+<input id="cname" type="text" placeholder="Class name (e.g. 7A)" style="flex:2;min-width:160px">
+<input id="ccount" type="number" min="1" max="1000" placeholder="Number of voters" style="flex:1;min-width:120px">
+<button id="gen">Generate codes</button></div>
 <select id="flt"><option value="">All</option><option>Used</option><option>Unused</option></select>
 <div id="amsg" class="m"></div><div class="tw"><table id="tb"></table></div></div>
 </div></div>
 <script>
 const $=id=>document.getElementById(id);
+const esc=s=>String(s).replace(/[&<>"]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[m]));
 let pw=sessionStorage.getItem("pw")||"",codes=[];
 const api=(u,o={})=>fetch(u,{...o,headers:{"x-admin-password":pw,"content-type":"application/json"}});
 async function boot(){
-  const r=await api("/api/admin/stats");
+  const r=await api("/api/admin/stats?class="+($("cls").value||""));
   if(r.status===401){sessionStorage.removeItem("pw");$("login").hidden=false;$("app").hidden=true;return false}
   $("login").hidden=true;$("app").hidden=false;draw(await r.json());return true}
 $("in").onclick=async()=>{pw=$("pw").value;sessionStorage.setItem("pw",pw);
-  if(await boot()){loadPics();loadCodes()}else $("lerr").textContent="Wrong password."};
+  if(await boot()){await loadClasses();loadPics();loadCodes();setInterval(()=>{loadClasses();boot()},10000)}else $("lerr").textContent="Wrong password."};
+$("pw").addEventListener("keydown",e=>{if(e.key==="Enter")$("in").click()});
 function draw(s){
   const v=s.votes,tot=v[1]+v[2]+v[3],p=(a,b)=>b?(a/b*100).toFixed(1)+"%":"0.0%";
   $("stats").innerHTML=[["Total codes",s.total],["Votes received",tot],["Unused codes",s.total-s.used],["Used codes",s.used],["Voting percentage",p(s.used,s.total)]]
@@ -61,13 +65,21 @@ function shrink(file){return new Promise(res=>{const i=new Image();i.onload=()=>
   c.width=i.width*k;c.height=i.height*k;c.getContext("2d").drawImage(i,0,0,c.width,c.height);res(c.toDataURL("image/jpeg",.9))};i.src=URL.createObjectURL(file)})}
 async function loadCodes(){codes=await (await api("/api/admin/codes")).json();showCodes()}
 function showCodes(){const f=$("flt").value;
-  $("tb").innerHTML="<tr><th>Code</th><th>Status</th></tr>"+codes.filter(c=>!f||(f==="Used")===!!c.used_at)
-   .map(c=>`<tr><td>${c.code}</td><td>${c.used_at?"Used":"Unused"}</td></tr>`).join("")}
+  $("tb").innerHTML="<tr><th>Class</th><th>Code</th><th>Status</th></tr>"+codes.filter(c=>(!f||(f==="Used")===!!c.used_at)&&(!$("cls").value||c.class===$("cls").selectedOptions[0].dataset.name))
+   .map(c=>`<tr><td>${esc(c.class||"-")}</td><td>${c.code}</td><td>${c.used_at?"Used":"Unused"}</td></tr>`).join("")}
 $("flt").onchange=showCodes;
-$("gen").onclick=async()=>{const r=await api("/api/admin/generate",{method:"POST",body:"{}"});
-  $("amsg").textContent=r.ok?"":(await r.json()).error;boot();loadCodes()};
+async function loadClasses(){
+  const cs=await (await api("/api/admin/classes")).json(),cur=$("cls").value;
+  $("cls").innerHTML='<option value="">All classes</option>'+cs.map(c=>`<option value="${c.id}" data-name="${esc(c.name)}">${esc(c.name)} (${c.used}/${c.total} voted)</option>`).join("");
+  $("cls").value=cur}
+$("cls").onchange=()=>{boot();showCodes()};
+$("gen").onclick=async()=>{
+  const r=await api("/api/admin/generate",{method:"POST",body:JSON.stringify({name:$("cname").value,count:$("ccount").value})});
+  const j=await r.json();$("amsg").textContent=r.ok?"":j.error;
+  if(r.ok){$("cname").value="";$("ccount").value=""}
+  await loadClasses();boot();loadCodes()};
 async function dl(type){const r=await api("/api/admin/export?type="+type);if(!r.ok)return;
   const a=document.createElement("a");a.href=URL.createObjectURL(await r.blob());a.download=type+"-"+new Date().toISOString().slice(0,10)+".xlsx";a.click()}
 $("exv").onclick=()=>dl("votes");$("exc").onclick=()=>dl("codes");
-boot().then(ok=>{if(ok){loadPics();loadCodes();setInterval(boot,10000)}});
+boot().then(async ok=>{if(ok){await loadClasses();loadPics();loadCodes();setInterval(()=>{loadClasses();boot()},10000)}});
 </script></body></html>
